@@ -29,6 +29,7 @@ import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Build;
+import android.os.IBinder;
 import android.preference.PreferenceManager;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
@@ -48,7 +49,13 @@ import java.util.List;
 import java.util.UUID;
 import org.holylobster.nuntius.bluetooth.BluetoothConnectionProvider;
 import org.holylobster.nuntius.network.NetworkConnectionProvider;
+import org.holylobster.nuntius.network.SslNetworkConnectionProvider;
 
+import java.io.File;
+import java.io.IOException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -71,12 +78,17 @@ public final class Server extends BroadcastReceiver implements SharedPreferences
         this.context = context;
     }
 
+    public static Boolean bluetoothAvailable = null;
+
     public static boolean bluetoothEnabled() {
-        return BluetoothAdapter.getDefaultAdapter() != null && BluetoothAdapter.getDefaultAdapter().isEnabled();
+        return bluetoothAvailable() && BluetoothAdapter.getDefaultAdapter().isEnabled();
     }
 
     public static boolean bluetoothAvailable() {
-        return BluetoothAdapter.getDefaultAdapter() != null;
+        if (bluetoothAvailable == null) {
+            bluetoothAvailable = BluetoothAdapter.getDefaultAdapter() != null;
+        }
+        return bluetoothAvailable;
     }
 
     public void onNotificationPosted(StatusBarNotification sbn) {
@@ -147,7 +159,7 @@ public final class Server extends BroadcastReceiver implements SharedPreferences
         boolean mustRun = defaultSharedPreferences.getBoolean("main_enable_switch", true);
 
         if (mustRun) {
-            startThread();
+            startAll();
         }
     }
 
@@ -158,7 +170,16 @@ public final class Server extends BroadcastReceiver implements SharedPreferences
 
         PreferenceManager.getDefaultSharedPreferences(context).unregisterOnSharedPreferenceChangeListener(this);
 
-        stopThread();
+        stopAll();
+    }
+
+    void stopAll() {
+        stopBluetooth();
+        stopNetwork();
+        for (Connection connection : connections) {
+            connection.close();
+        }
+        connections.clear();
     }
 
     public String getStatusMessage() {
@@ -189,10 +210,10 @@ public final class Server extends BroadcastReceiver implements SharedPreferences
                 case BluetoothAdapter.STATE_OFF:
                 case BluetoothAdapter.STATE_TURNING_OFF:
                 case BluetoothAdapter.STATE_TURNING_ON:
-                    stopThread();
+                    stopBluetooth();
                     break;
                 case BluetoothAdapter.STATE_ON:
-                    startThread();
+                    startBluetooth();
                     break;
             }
         }
@@ -203,9 +224,9 @@ public final class Server extends BroadcastReceiver implements SharedPreferences
         switch (key) {
             case "main_enable_switch":
                 if (sharedPreferences.getBoolean("main_enable_switch", true)) {
-                    startThread();
+                    startAll();
                 } else {
-                    stopThread();
+                    stopAll();
                 }
                 break;
             case "pref_min_notification_priority":
@@ -215,28 +236,44 @@ public final class Server extends BroadcastReceiver implements SharedPreferences
         }
     }
 
-    private void startThread() {
+    void startAll() {
+        startBluetooth();
+        startNetwork();
+    }
+
+    private void startBluetooth() {
         if (bluetoothEnabled()) {
             bluetoothConnectionProvider = new BluetoothConnectionProvider(this);
             bluetoothConnectionProvider.start();
-        }
-        else {
+        } else {
             Log.i(TAG, "Bluetooth not available or enabled. Cannot start Bluetooth server");
         }
+        notifyListener(getStatusMessage());
+    }
 
+    private void startNetwork() {
         if (networkAvailable()) {
-            networkConnectionProvider = new NetworkConnectionProvider(this);
-            networkConnectionProvider.start();
+            try {
+                //networkConnectionProvider = new NetworkConnectionProvider(this);
+                networkConnectionProvider = new SslNetworkConnectionProvider(this, new File(context.getFilesDir(), "custom.bks"));
+                networkConnectionProvider.start();
+            } catch (CertificateException | NoSuchAlgorithmException | KeyStoreException | IOException e) {
+                Log.e(TAG, "Error creating SSL server", e);
+            }
         }
-
         notifyListener(getStatusMessage());
     }
 
     private boolean networkAvailable() {
         ConnectivityManager connManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo mWifi = connManager.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+        //NetworkInfo mWifi = connManager.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+        //return mWifi.isConnected();
 
-        return mWifi.isConnected();
+        if (connManager.getActiveNetworkInfo() != null && connManager.getActiveNetworkInfo().isAvailable() && connManager.getActiveNetworkInfo().isConnected()) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
@@ -265,10 +302,9 @@ public final class Server extends BroadcastReceiver implements SharedPreferences
                 }
             }
         }
-
     }
 
-    private void stopThread() {
+    private void stopBluetooth() {
         Log.i(TAG, "Stopping server thread.");
         if (bluetoothConnectionProvider != null) {
             bluetoothConnectionProvider.close();
@@ -277,17 +313,16 @@ public final class Server extends BroadcastReceiver implements SharedPreferences
             Log.i(TAG, "Bluetooth Server thread already stopped.");
         }
 
+        notifyListener(getStatusMessage());
+    }
+
+    private void stopNetwork() {
         if (networkConnectionProvider != null) {
             networkConnectionProvider.close();
             Log.i(TAG, "Network Server thread stopped.");
         } else {
             Log.i(TAG, "Network Server thread already stopped.");
         }
-
-        for (Connection connection : connections) {
-            connection.close();
-        }
-        connections.clear();
 
         notifyListener(getStatusMessage());
     }

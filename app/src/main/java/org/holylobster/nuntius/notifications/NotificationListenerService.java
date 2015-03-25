@@ -19,10 +19,46 @@ package org.holylobster.nuntius.notifications;
 
 import android.content.Intent;
 import android.os.IBinder;
+import android.security.KeyPairGeneratorSpec;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
 import org.holylobster.nuntius.Server;
+import org.spongycastle.asn1.x500.X500Name;
+import org.spongycastle.cert.X509CertificateHolder;
+import org.spongycastle.cert.X509v3CertificateBuilder;
+import org.spongycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.spongycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.spongycastle.jce.provider.BouncyCastleProvider;
+import org.spongycastle.operator.ContentSigner;
+import org.spongycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.spongycastle.util.encoders.Base64;
+import org.spongycastle.x509.X509V3CertificateGenerator;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.math.BigInteger;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.Key;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.PrivateKey;
+import java.security.Provider;
+import java.security.SecureRandom;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.Enumeration;
+
+import javax.security.auth.x500.X500Principal;
 
 public class NotificationListenerService extends android.service.notification.NotificationListenerService {
 
@@ -37,8 +73,13 @@ public class NotificationListenerService extends android.service.notification.No
         IBinder mIBinder = super.onBind(mIntent);
         Log.i(TAG, "onBind");
         isNotificationAccessEnabled = true;
-        server = new Server(this);
-        server.start();
+        try {
+            server = new Server(this);
+            server.start();
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+        }
         return mIBinder;
     }
 
@@ -47,8 +88,13 @@ public class NotificationListenerService extends android.service.notification.No
         boolean mOnUnbind = super.onUnbind(mIntent);
         Log.i(TAG, "onUnbind");
         isNotificationAccessEnabled = false;
-        server.stop();
-        server = null;
+        try {
+            server.stop();
+            server = null;
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+        }
         return mOnUnbind;
     }
 
@@ -67,4 +113,5 @@ public class NotificationListenerService extends android.service.notification.No
         Log.d(TAG, "Notification from " + sbn.getPackageName() + " removed");
         server.onNotificationRemoved(sbn);
     }
+
 }
